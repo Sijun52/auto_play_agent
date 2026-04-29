@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "company-llm": {
+      "name": "Company Private LLM",
+      "apiKey": "your-api-key-here",
+      "models": [
+        {
+          "id": "gpt-4",
+          "name": "Company LLM",
+          "attachment": false,
+          "reasoning": false
+        }
+      ],
+      "options": {
+        "baseURL": "http://your-company-llm-server/v1"
+      }
+    }
+  },
+  "model": "company-llm/gpt-4",
+  "autoshare": false
+}

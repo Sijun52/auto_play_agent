@@ -5,6 +5,10 @@ import requests
 from .config import OPENCODE_URL, POLL_INTERVAL, STABLE_THRESHOLD, SESSION_TIMEOUT
 
 
+class TokenLimitError(Exception):
+    """Raised when OpenCode returns 400 with a token/context limit detail."""
+
+
 class OpenCodeClient:
     """
     REST client for `opencode serve --port 4096`.
@@ -32,6 +36,8 @@ class OpenCodeClient:
             json={"role": "user", "content": content},
             timeout=30,
         )
+        if r.status_code == 400 and "token limit" in r.text.lower():
+            raise TokenLimitError(r.text)
         r.raise_for_status()
 
     def get_messages(self, session_id: str) -> list[dict]:

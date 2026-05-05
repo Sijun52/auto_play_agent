@@ -17,7 +17,7 @@ from .config import (
 )
 from .git import checkout_nightly_branch, create_pr, get_diff, git, has_staged_changes, push_branch
 from .models import Task
-from .opencode import OpenCodeClient
+from .opencode import OpenCodeClient, TokenLimitError
 from .prompts import SYSTEM_ANALYST, SYSTEM_AUTONOMOUS, SYSTEM_LEAD, SYSTEM_REVIEWER
 from .task_manager import TaskManager
 
@@ -73,6 +73,15 @@ class AutoPlayAgent:
             return json.loads(raw)
         except json.JSONDecodeError:
             return {"status": "complete", "summary": raw, "follow_up": None, "issues": []}
+
+    def _compact(self, session_id: str, retry_prompt: str, compact_count: int) -> None:
+        if compact_count >= 2:
+            raise RuntimeError("Token limit persists after 2 compactions — aborting task")
+        print(f"  [OpenCode] Token limit — compacting ({compact_count + 1}/2)…")
+        self.oc.send_message(session_id, "/compact")
+        self.oc.wait_until_idle(session_id)
+        print("  [OpenCode] Compact done — retrying…")
+        self.oc.send_message(session_id, retry_prompt)
 
     def _gather_project_context(self, max_chars: int = 6000) -> str:
         parts = []
@@ -165,7 +174,14 @@ class AutoPlayAgent:
 
             prompt = self._make_prompt(task)
             print("  [Agent]    Sending prompt to OpenCode…")
-            self.oc.send_message(session_id, prompt)
+            try:
+                self.oc.send_message(session_id, prompt)
+            except TokenLimitError:
+                self._compact(session_id, prompt, compact_count)
+                compact_count += 1
+
+            last_prompt = prompt
+            compact_count = 0
 
             for turn in range(1, MAX_REVIEW_TURNS + 1):
                 print(f"  [OpenCode] Working… (turn {turn}/{MAX_REVIEW_TURNS})")
@@ -192,7 +208,12 @@ class AutoPlayAgent:
                 if follow_up:
                     issues = review.get("issues", [])
                     print(f"  [Agent]    Follow-up: {', '.join(str(i) for i in issues[:2])}")
-                    self.oc.send_message(session_id, follow_up)
+                    last_prompt = follow_up
+                    try:
+                        self.oc.send_message(session_id, follow_up)
+                    except TokenLimitError:
+                        self._compact(session_id, follow_up, compact_count)
+                        compact_count += 1
 
         except Exception as exc:
             print(f"  [ERROR]    {exc}")

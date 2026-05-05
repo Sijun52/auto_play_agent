@@ -40,19 +40,55 @@ def get_diff(max_chars: int = 4000) -> str:
         return ""
 
 
-def checkout_nightly_branch() -> str:
-    """Create feature/ai-nightly-YYYY-MM-DD; append -2/-3 if already exists."""
+def _latest_unmerged_nightly() -> str | None:
+    """
+    Return the most recent feature/ai-nightly-* remote branch not yet merged into BASE_BRANCH.
+    Used to chain nightly branches so multi-day work doesn't conflict.
+    """
+    try:
+        git("fetch", "origin", "--prune", "--quiet")
+        out = git(
+            "branch", "-r",
+            "--no-merged", f"origin/{BASE_BRANCH}",
+            "--list", "origin/feature/ai-nightly-*",
+        )
+        branches = sorted(b.strip() for b in out.splitlines() if b.strip())
+        if branches:
+            return branches[-1].removeprefix("origin/")
+    except Exception:
+        pass
+    return None
+
+
+def checkout_nightly_branch() -> tuple[str, bool]:
+    """
+    Reuse the most recent unmerged nightly branch if one exists (accumulating across nights),
+    otherwise create feature/ai-nightly-YYYY-MM-DD from BASE_BRANCH.
+    Returns (branch_name, pr_already_exists).
+    """
+    existing = _latest_unmerged_nightly()
+    if existing:
+        git("fetch", "origin", existing)
+        try:
+            git("checkout", "-b", existing, f"origin/{existing}")
+        except RuntimeError as exc:
+            if "already exists" in str(exc):
+                git("checkout", existing)
+                git("reset", "--hard", f"origin/{existing}")
+            else:
+                raise
+        return existing, True
+
     base = f"feature/ai-nightly-{datetime.now().strftime('%Y-%m-%d')}"
-    candidate = base
     for suffix in [None, *range(2, 10)]:
         candidate = base if suffix is None else f"{base}-{suffix}"
         try:
             git("checkout", "-b", candidate)
-            return candidate
+            return candidate, False
         except RuntimeError as exc:
             if "already exists" not in str(exc):
                 raise
-    raise RuntimeError(f"Could not create a unique nightly branch for: {base}")
+    raise RuntimeError(f"Could not create nightly branch: {base}")
 
 
 def push_branch(branch: str) -> bool:
@@ -76,7 +112,7 @@ def _github_repo() -> tuple[str, str] | None:
 
 
 def create_pr(title: str, body: str, branch: str) -> str:
-    """Create GitHub PR via REST API. Returns PR URL or '' on failure."""
+    """Create GitHub PR via REST API. Returns PR URL or '' when token/repo unset."""
     if not GITHUB_TOKEN:
         return ""
     repo = _github_repo()

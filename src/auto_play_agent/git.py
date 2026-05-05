@@ -83,19 +83,16 @@ def create_pr(title: str, body: str, branch: str) -> str:
     if not repo:
         return ""
     owner, name = repo
-    try:
-        resp = _req.post(
-            f"https://api.github.com/repos/{owner}/{name}/pulls",
-            json={"title": title, "body": body, "head": branch, "base": BASE_BRANCH},
-            headers={
-                "Authorization": f"Bearer {GITHUB_TOKEN}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            timeout=30,
-        )
-        if resp.status_code == 201:
-            return resp.json().get("html_url", "")
-    except Exception:
-        pass
-    return ""
+    resp = _req.post(
+        f"https://api.github.com/repos/{owner}/{name}/pulls",
+        json={"title": title, "body": body, "head": branch, "base": BASE_BRANCH},
+        headers={
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        timeout=30,
+    )
+    if resp.status_code == 201:
+        return resp.json().get("html_url", "")
+    raise RuntimeError(f"GitHub API {resp.status_code}: {resp.json()}")

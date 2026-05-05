@@ -49,22 +49,31 @@ class TaskManager:
             i += 1
         return tasks
 
+    def _find_line(self, lines: list[str], title: str) -> int:
+        """Locate the current line index for a task by title (re-scan avoids stale indices)."""
+        escaped = re.escape(title)
+        for i, line in enumerate(lines):
+            if re.match(rf"^### \[[x ~!]\] {escaped}\s*$", line.rstrip()):
+                return i
+        raise ValueError(f"Task not found in {self.path}: {title!r}")
+
     def set_status(self, task: Task, status: str, branch: str = "") -> None:
         lines = self.path.read_text(encoding="utf-8").splitlines(keepends=True)
+        idx = self._find_line(lines, task.title)
 
         if status == "in_progress":
-            lines[task.line_index] = re.sub(
-                r"^(### \[)[x ~!](\] .+\n?)$", r"\g<1>~\2", lines[task.line_index]
+            lines[idx] = re.sub(
+                r"^(### \[)[x ~!](\] .+\n?)$", r"\g<1>~\2", lines[idx]
             )
             self.path.write_text("".join(lines), encoding="utf-8")
             return
 
         # completed / failed → extract block, archive, remove from tasks.md
-        end = task.line_index + 1
+        end = idx + 1
         while end < len(lines) and not re.match(r"^### \[", lines[end]):
             end += 1
 
-        block = list(lines[task.line_index:end])
+        block = list(lines[idx:end])
         char = STATUS_CHAR[status]
         block[0] = re.sub(r"^(### \[)[x ~!](\] .+\n?)$", rf"\g<1>{char}\2", block[0])
 
@@ -75,7 +84,7 @@ class TaskManager:
 
         self._archive(block)
 
-        remaining = lines[: task.line_index] + lines[end:]
+        remaining = lines[:idx] + lines[end:]
         self.path.write_text("".join(remaining), encoding="utf-8")
 
     def _archive(self, block: list[str]) -> None:

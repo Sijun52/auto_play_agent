@@ -1,5 +1,4 @@
 import time
-from typing import Optional
 
 import requests
 
@@ -51,7 +50,7 @@ class OpenCodeClient:
         """Poll until assistant response stabilizes (no new messages for STABLE_THRESHOLD sec)."""
         deadline = time.time() + SESSION_TIMEOUT
         last_count = 0
-        stable_since: Optional[float] = None
+        stable_since: float = time.time()  # track from start so 0-message stalls are caught
 
         while time.time() < deadline:
             msgs = self.get_messages(session_id)
@@ -61,7 +60,7 @@ class OpenCodeClient:
             if count > last_count:
                 last_count = count
                 stable_since = time.time()
-            elif stable_since and time.time() - stable_since >= STABLE_THRESHOLD:
+            elif time.time() - stable_since >= STABLE_THRESHOLD:
                 if assistant_msgs:
                     content = assistant_msgs[-1].get("content", "")
                     if isinstance(content, list):
@@ -69,6 +68,9 @@ class OpenCodeClient:
                             p.get("text", "") for p in content if isinstance(p, dict)
                         )
                     return content
+                raise TimeoutError(
+                    f"Session {session_id} produced no response after {STABLE_THRESHOLD}s"
+                )
 
             time.sleep(POLL_INTERVAL)
 

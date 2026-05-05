@@ -18,7 +18,7 @@ from .config import (
 from .git import checkout_nightly_branch, create_pr, get_diff, git, has_staged_changes, push_branch
 from .models import Task
 from .opencode import OpenCodeClient
-from .prompts import SYSTEM_ANALYST, SYSTEM_LEAD, SYSTEM_REVIEWER
+from .prompts import SYSTEM_ANALYST, SYSTEM_AUTONOMOUS, SYSTEM_LEAD, SYSTEM_REVIEWER
 from .task_manager import TaskManager
 
 
@@ -73,6 +73,71 @@ class AutoPlayAgent:
             return json.loads(raw)
         except json.JSONDecodeError:
             return {"status": "complete", "summary": raw, "follow_up": None, "issues": []}
+
+    def _gather_project_context(self, max_chars: int = 6000) -> str:
+        parts = []
+        try:
+            parts.append("=== Recent commits ===\n" + git("log", "--oneline", "-20"))
+        except Exception:
+            pass
+        try:
+            parts.append("=== Recently changed files ===\n" + git("diff", "--stat", "HEAD~5..HEAD"))
+        except Exception:
+            pass
+        try:
+            parts.append("=== Recent diff ===\n" + git("diff", "HEAD~3..HEAD"))
+        except Exception:
+            pass
+        try:
+            parts.append("=== Tracked files ===\n" + git("ls-files"))
+        except Exception:
+            pass
+        context = "\n\n".join(parts)
+        if len(context) > max_chars:
+            context = context[:max_chars] + "\n…(truncated)"
+        return context
+
+    def _autonomous_scan(self) -> list[Task]:
+        print("      Scanning codebase for improvements…")
+        context = self._gather_project_context()
+        if not context.strip():
+            print("      Could not gather project context. Skipping.")
+            return []
+
+        raw = self._chat(
+            SYSTEM_AUTONOMOUS,
+            f"Codebase context:\n{context}\n\n"
+            "Identify 2-3 specific improvements. "
+            'Return JSON array: [{"title":"...","priority":"high|medium|low","description":"...","details":"..."}]',
+        )
+        raw = re.sub(r"^```json?\s*|\s*```$", "", raw.strip(), flags=re.MULTILINE)
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            print("      Could not parse scan results. Skipping.")
+            return []
+
+        if not isinstance(items, list) or not items:
+            return []
+
+        # Append auto-generated tasks to tasks.md
+        with self.tm.path.open("a", encoding="utf-8") as f:
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                f.write(f"\n### [ ] {item.get('title', 'Untitled')}\n")
+                f.write(f"- **Priority**: {item.get('priority', 'medium')}\n")
+                f.write(f"- **Description**: {item.get('description', '')}\n")
+                f.write(f"- **Details**: {item.get('details', '')}\n")
+
+        pending = sorted(
+            [t for t in self.tm.load() if t.status == "pending"],
+            key=lambda t: PRIORITY_ORDER.get(t.priority, 1),
+        )
+        print(f"      Found {len(pending)} autonomous improvement(s):")
+        for t in pending:
+            print(f"      [{t.priority:6}] {t.title}")
+        return pending
 
     def _suggest_improvements(self, completed: list[Task]) -> list[str]:
         if not completed:
@@ -172,8 +237,11 @@ class AutoPlayAgent:
             print(f"      [{t.priority:6}] {t.title}")
 
         if not pending:
-            print("\n      Nothing to do. Exiting.")
-            return
+            print("\n      No pending tasks — switching to autonomous improvement mode.")
+            pending = self._autonomous_scan()
+            if not pending:
+                print("      Nothing to do. Exiting.")
+                return
 
         print("\n[3/4] Executing tasks…")
         nightly_branch, pr_exists = checkout_nightly_branch()

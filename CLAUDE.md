@@ -37,6 +37,13 @@ run() in agent.py
            if needs_work → send follow_up prompt, continue
   └─ push_branch() → create_pr()       # one GitHub PR for all tasks at end
   └─ _suggest_improvements()           # LLM proposes follow-ups
+
+# When tasks.md has no pending tasks:
+run() → _autonomous_scan()
+  └─ _gather_project_context()         # git log + diff + ls-files (truncated to 6000 chars)
+  └─ LLM returns JSON array of 2-3 improvements
+  └─ appends them to tasks.md as [ ] tasks
+  └─ proceeds with normal execution flow
 ```
 
 ### Key design decisions
@@ -55,7 +62,7 @@ run() in agent.py
 | `__main__.py` | Entry point; parses `--at HH:MM` flag and delegates to `AutoPlayAgent.run()` |
 | `agent.py` | `AutoPlayAgent` orchestrator — the only place that coordinates all other modules |
 | `opencode.py` | REST client for `opencode serve`; owns the polling/idle-detection loop |
-| `task_manager.py` | Reads/writes `tasks.md`; archives to `tasks_done.md`; crash recovery via `reset_in_progress()` |
+| `task_manager.py` | Reads/writes `tasks.md`; archives to `tasks_done.md`; crash recovery via `reset_in_progress()`; auto-generated tasks are appended directly via file open in `_autonomous_scan()` |
 | `git.py` | git subprocess wrappers; nightly branch reuse logic; GitHub REST API PR creation |
 | `config.py` | All env vars and tuneable constants (`POLL_INTERVAL`, `STABLE_THRESHOLD`, `SESSION_TIMEOUT`, `MAX_REVIEW_TURNS`) |
 | `prompts.py` | Three LLM system prompts as module-level constants |

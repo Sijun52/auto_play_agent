@@ -6,13 +6,17 @@
 사용자 퇴근
     ↓
 Auto Play Agent (Orchestrator LLM)
+    ↓  tasks.md에 pending 태스크 있으면 → 순서대로 실행
+    ↓  tasks.md가 비어 있으면 → 자율 개선 모드
+    │     git log / diff / 파일 목록 분석
+    │     LLM이 2-3개 개선 태스크 자동 생성 → tasks.md에 기록
     ↓  구현 프롬프트 생성
 OpenCode (Worker)
     ↓  코드 작업 완료
 Auto Play Agent
     ↓  결과 리뷰 → 부족하면 추가 지시 (최대 4턴)
     ↓  완료 → git commit → tasks_done.md 이관
-    ↓  모든 태스크 완료 후 미발견 개선점 제안
+    ↓  PR 생성 (신규) 또는 기존 PR 업데이트
 사용자 출근 후 PR 리뷰
 ```
 
